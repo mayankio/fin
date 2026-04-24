@@ -5,8 +5,13 @@ import time
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
+try:
+    from playwright_stealth import Stealth
+except ImportError:
+    Stealth = None
 
 AUTH_STATE_FILE = ".auth_state.json"
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 class SocialDataProvider(abc.ABC):
     """
@@ -41,15 +46,16 @@ class BrowserScraperProvider(SocialDataProvider):
         print("Please log into Reddit and X. Close the browser when finished.")
         
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.firefox.launch(headless=False)
             
-            # If we already have a state, load it to avoid re-logging in if possible
             if os.path.exists(self.auth_file):
-                context = browser.new_context(storage_state=self.auth_file)
+                context = browser.new_context(storage_state=self.auth_file, user_agent=USER_AGENT, viewport={'width': 1280, 'height': 800})
             else:
-                context = browser.new_context()
+                context = browser.new_context(user_agent=USER_AGENT, viewport={'width': 1280, 'height': 800})
 
             page = context.new_page()
+            if Stealth:
+                Stealth().apply_stealth_sync(page)
             
             # Open Reddit and X in separate tabs to prompt user
             page.goto("https://www.reddit.com/login/")
@@ -76,18 +82,25 @@ class BrowserScraperProvider(SocialDataProvider):
             page.wait_for_timeout(3000) # Give time for React to render
 
             # Simple heuristic: grab post titles and snippets
-            # Note: Reddit DOM changes often, so we use broad selectors
-            posts = page.locator('a[data-testid="post-title"]')
-            snippets = page.locator('div[data-testid="post-content"]')
+            # Reddit uses custom <shreddit-post> web components
+            try:
+                page.wait_for_selector('shreddit-post', timeout=8000)
+            except Exception:
+                pass # Timeout, maybe no posts or blocked
+                
+            posts = page.locator('shreddit-post')
             
             count = posts.count()
             for i in range(min(count, 15)): # Limit to top 15 posts
-                title = posts.nth(i).text_content()
+                title = posts.nth(i).get_attribute("post-title")
+                if not title:
+                    title = posts.nth(i).text_content()
+                
                 if title:
                     results.append({
                         'source': 'Reddit',
                         'text': title.strip(),
-                        'timestamp': datetime.now().isoformat() # Approximated, as parsing Reddit relative time is complex
+                        'timestamp': datetime.now().isoformat()
                     })
         except Exception as e:
             print(f"Failed to scrape Reddit for {ticker}: {e}")
@@ -100,16 +113,23 @@ class BrowserScraperProvider(SocialDataProvider):
             page.goto(url, wait_until="domcontentloaded")
             page.wait_for_timeout(3000)
 
-            tweets = page.locator('div[data-testid="tweetText"]')
+            try:
+                page.wait_for_selector('article', timeout=8000)
+            except Exception:
+                pass
+
+            tweets = page.locator('article')
             count = tweets.count()
             for i in range(min(count, 15)):
-                text = tweets.nth(i).text_content()
-                if text:
-                    results.append({
-                        'source': 'X',
-                        'text': text.strip(),
-                        'timestamp': datetime.now().isoformat()
-                    })
+                tweet_text_locator = tweets.nth(i).locator('div[data-testid="tweetText"]')
+                if tweet_text_locator.count() > 0:
+                    text = tweet_text_locator.nth(0).text_content()
+                    if text:
+                        results.append({
+                            'source': 'X',
+                            'text': text.strip(),
+                            'timestamp': datetime.now().isoformat()
+                        })
         except Exception as e:
             print(f"Failed to scrape X for {ticker}: {e}")
         return results
@@ -123,14 +143,17 @@ class BrowserScraperProvider(SocialDataProvider):
             # Depending on use case, could force authenticate() here, but we will try unauthenticated
             
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            # Launch headful to bypass strict bot blocks
+            browser = p.firefox.launch(headless=False)
             
             if os.path.exists(self.auth_file):
-                context = browser.new_context(storage_state=self.auth_file)
+                context = browser.new_context(storage_state=self.auth_file, user_agent=USER_AGENT, viewport={'width': 1280, 'height': 800})
             else:
-                context = browser.new_context()
+                context = browser.new_context(user_agent=USER_AGENT, viewport={'width': 1280, 'height': 800})
 
             page = context.new_page()
+            if Stealth:
+                Stealth().apply_stealth_sync(page)
             
             print(f"Scraping social chatter for {ticker} (lookback: {lookback_days} days)...")
             reddit_data = self._scrape_reddit(page, ticker, lookback_days)

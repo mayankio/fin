@@ -27,3 +27,4 @@ venv.bak/
 dist/
 build/
 *.egg-info/
+.auth_state.json

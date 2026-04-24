@@ -10,3 +10,4 @@ torch
 
 pytest
 pytest-mock
+playwright-stealth
