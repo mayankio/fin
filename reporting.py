@@ -64,7 +64,7 @@ class RecommendationEngine:
     Aggregates analyzer outputs to generate a reasoned string with a BUY/HOLD/SELL verdict.
     """
     
-    def generate_recommendation(self, ticker: str, tech_results: Dict[str, Any], fund_results: Dict[str, Any]) -> str:
+    def generate_recommendation(self, ticker: str, tech_results: Dict[str, Any], fund_results: Dict[str, Any], sentiment_results: Dict[str, Any] = None) -> str:
         score = 0
         reasoning = [f"--- Recommendation Report for {ticker} ---"]
         
@@ -111,6 +111,28 @@ class RecommendationEngine:
                 
         reasoning.append(f"Fundamental Summary: {fund_results.get('summary')}")
         reasoning.append(f"Fundamental Notes: {', '.join(fund_notes) if fund_notes else 'None'}")
+
+        # Sentiment Evaluation
+        if sentiment_results and 'error' not in sentiment_results:
+            sentiment_summary = sentiment_results.get('summary', '')
+            overall_sentiment = sentiment_results.get('overall_sentiment', 'Neutral')
+            
+            if overall_sentiment == 'Bullish':
+                score += 1
+            elif overall_sentiment == 'Bearish':
+                score -= 1
+                
+            reasoning.append(f"Sentiment Summary: {sentiment_summary}")
+            
+            top_bullish = sentiment_results.get('top_bullish_headlines', [])
+            if top_bullish:
+                reasoning.append(f"  + Top Bullish: {top_bullish[0]}")
+                
+            top_bearish = sentiment_results.get('top_bearish_headlines', [])
+            if top_bearish:
+                reasoning.append(f"  - Top Bearish: {top_bearish[0]}")
+        elif sentiment_results and 'error' in sentiment_results:
+            reasoning.append(f"Sentiment Analysis Error: {sentiment_results['error']}")
         
         # Final Verdict Logic
         verdict = "HOLD"

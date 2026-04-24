@@ -2,7 +2,8 @@ import argparse
 from typing import List
 
 from data_provider import YFinanceProvider
-from analyzers import TechnicalAnalyzer, FundamentalAnalyzer
+from social_provider import BrowserScraperProvider
+from analyzers import TechnicalAnalyzer, FundamentalAnalyzer, SentimentAnalyzer
 from reporting import Visualizer, RecommendationEngine
 
 class MarketScanner:
@@ -12,12 +13,14 @@ class MarketScanner:
     """
     def __init__(self):
         self.provider = YFinanceProvider()
+        self.social_provider = BrowserScraperProvider()
         self.tech_analyzer = TechnicalAnalyzer()
         self.fund_analyzer = FundamentalAnalyzer()
+        self.sentiment_analyzer = SentimentAnalyzer()
         self.visualizer = Visualizer()
         self.rec_engine = RecommendationEngine()
 
-    def run(self, tickers: List[str]):
+    def run(self, tickers: List[str], enable_sentiment: bool = False, lookback_days: int = 7):
         print(f"--- Starting Market Scanner for: {', '.join(tickers)} ---")
         
         scored_stocks = []
@@ -34,8 +37,14 @@ class MarketScanner:
                 tech_results = self.tech_analyzer.run({'history': history})
                 fund_results = self.fund_analyzer.run({'info': info})
                 
+                sentiment_results = None
+                if enable_sentiment:
+                    print(f"Fetching social data for {ticker}...")
+                    social_data = self.social_provider.get_social_chatter(ticker, lookback_days)
+                    sentiment_results = self.sentiment_analyzer.run({'chatter': social_data})
+                
                 # Generate Recommendation
-                rec_report = self.rec_engine.generate_recommendation(ticker, tech_results, fund_results)
+                rec_report = self.rec_engine.generate_recommendation(ticker, tech_results, fund_results, sentiment_results)
                 
                 # Parse out score for sorting (Hack for scanner)
                 score_line = [line for line in rec_report.split('\n') if "Total Model Score" in line]
@@ -65,7 +74,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Market Scanner")
     parser.add_argument("--tickers", type=str, nargs='+', default=["AAPL", "MSFT", "GOOGL", "AMZN", "META"],
                         help="List of tickers to scan")
+    parser.add_argument("--enable-sentiment", action="store_true", help="Enable social media sentiment scraping")
+    parser.add_argument("--lookback-days", type=int, default=7, help="Days to look back for social chatter")
     args = parser.parse_args()
     
     scanner = MarketScanner()
-    scanner.run(tickers=args.tickers)
+    scanner.run(tickers=args.tickers, enable_sentiment=args.enable_sentiment, lookback_days=args.lookback_days)

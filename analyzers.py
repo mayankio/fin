@@ -168,3 +168,87 @@ class PortfolioAnalyzer(BaseAnalyzer):
             'sector_allocation': sectors_allocation,
             'risks': risks
         }
+
+class SentimentAnalyzer(BaseAnalyzer):
+    """
+    Evaluates market sentiment using HuggingFace's FinBERT model.
+    Expected data: {'chatter': [{'text': '...', 'source': '...', 'timestamp': '...'}, ...]}
+    """
+    def __init__(self):
+        try:
+            from transformers import pipeline
+            # FinBERT is specifically trained on financial text
+            self.nlp = pipeline("sentiment-analysis", model="ProsusAI/finbert")
+        except ImportError:
+            print("Warning: transformers library not found. SentimentAnalyzer requires it.")
+            self.nlp = None
+
+    def run(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        chatter = data.get('chatter', [])
+        if not chatter:
+             return {"error": "No chatter data provided for SentimentAnalyzer"}
+             
+        if not self.nlp:
+             return {"error": "NLP model not loaded. Is transformers installed?"}
+
+        texts = [item['text'] for item in chatter if item.get('text')]
+        if not texts:
+            return {"error": "No valid text found in chatter."}
+
+        try:
+            # Batch process the texts
+            # Some texts might be too long, we truncate them to 512 tokens implicitly by the pipeline
+            results = self.nlp(texts, truncation=True, max_length=512)
+        except Exception as e:
+            return {"error": f"Error running FinBERT: {str(e)}"}
+
+        bullish_count = 0
+        bearish_count = 0
+        neutral_count = 0
+
+        # ProsusAI/finbert labels: 'positive', 'negative', 'neutral'
+        scored_texts = []
+        for text, res in zip(texts, results):
+            label = res['label']
+            score = res['score']
+            
+            if label == 'positive':
+                bullish_count += 1
+            elif label == 'negative':
+                bearish_count += 1
+            else:
+                neutral_count += 1
+                
+            scored_texts.append({'text': text, 'label': label, 'score': score})
+
+        total = len(texts)
+        bullish_ratio = bullish_count / total
+        bearish_ratio = bearish_count / total
+        
+        # Determine overall sentiment
+        # We can use a simple threshold
+        if bullish_ratio > bearish_ratio + 0.1:
+            overall = "Bullish"
+        elif bearish_ratio > bullish_ratio + 0.1:
+            overall = "Bearish"
+        else:
+            overall = "Neutral"
+            
+        # Sentiment score from -1.0 to 1.0
+        sentiment_score = bullish_ratio - bearish_ratio
+
+        # Sort to find most impactful texts (highest confidence positive/negative)
+        top_bullish = sorted([x for x in scored_texts if x['label'] == 'positive'], key=lambda x: x['score'], reverse=True)[:3]
+        top_bearish = sorted([x for x in scored_texts if x['label'] == 'negative'], key=lambda x: x['score'], reverse=True)[:3]
+
+        return {
+            'overall_sentiment': overall,
+            'sentiment_score': sentiment_score,
+            'bullish_ratio': bullish_ratio,
+            'bearish_ratio': bearish_ratio,
+            'total_analyzed': total,
+            'top_bullish_headlines': [x['text'] for x in top_bullish],
+            'top_bearish_headlines': [x['text'] for x in top_bearish],
+            'summary': f"Sentiment: {overall} (Score: {sentiment_score:.2f}) | Bullish: {bullish_ratio:.1%} | Bearish: {bearish_ratio:.1%}"
+        }
+
