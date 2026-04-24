@@ -59,6 +59,126 @@ class Visualizer:
             
         return fig
 
+    def plot_efficient_frontier(self, frontier_data: dict, current_portfolio: dict = None, show: bool = True) -> go.Figure:
+        """
+        Renders an interactive Efficient Frontier chart.
+
+        Displays:
+        - Efficient Frontier curve (volatility vs return)
+        - Max Sharpe portfolio (star marker)
+        - Min Variance portfolio (diamond marker)
+        - Individual assets (circle markers)
+        - Optional: Current portfolio position (X marker)
+
+        :param frontier_data: Dict from EfficientFrontierAnalyzer with keys:
+            frontier_volatilities, frontier_returns, max_sharpe, min_variance, individual_stats
+        :param current_portfolio: Optional dict with keys: expected_return, volatility, sharpe_ratio
+        :param show: Whether to display the figure.
+        :return: Plotly Figure object, or None if data is invalid.
+        """
+        if not frontier_data or 'error' in frontier_data:
+            print("No frontier data available to plot.")
+            return None
+
+        fig = go.Figure()
+
+        # 1. Efficient Frontier curve
+        fig.add_trace(go.Scatter(
+            x=frontier_data['frontier_volatilities'],
+            y=frontier_data['frontier_returns'],
+            mode='lines',
+            name='Efficient Frontier',
+            line=dict(color='#636EFA', width=3),
+            hovertemplate='Volatility: %{x:.2%}<br>Return: %{y:.2%}<extra></extra>'
+        ))
+
+        # 2. Max Sharpe portfolio
+        ms = frontier_data['max_sharpe']
+        ms_weights_str = "<br>".join(f"  {t}: {w:.1%}" for t, w in ms['weights'].items())
+        fig.add_trace(go.Scatter(
+            x=[ms['volatility']],
+            y=[ms['expected_return']],
+            mode='markers',
+            name=f"Max Sharpe (SR={ms['sharpe_ratio']:.3f})",
+            marker=dict(color='gold', size=18, symbol='star', line=dict(color='black', width=1.5)),
+            hovertemplate=(
+                f"<b>Max Sharpe Portfolio</b><br>"
+                f"Return: {ms['expected_return']:.2%}<br>"
+                f"Volatility: {ms['volatility']:.2%}<br>"
+                f"Sharpe: {ms['sharpe_ratio']:.4f}<br>"
+                f"<br>Weights:<br>{ms_weights_str}<extra></extra>"
+            )
+        ))
+
+        # 3. Min Variance portfolio
+        mv = frontier_data['min_variance']
+        mv_weights_str = "<br>".join(f"  {t}: {w:.1%}" for t, w in mv['weights'].items())
+        fig.add_trace(go.Scatter(
+            x=[mv['volatility']],
+            y=[mv['expected_return']],
+            mode='markers',
+            name=f"Min Variance (SR={mv['sharpe_ratio']:.3f})",
+            marker=dict(color='limegreen', size=16, symbol='diamond', line=dict(color='black', width=1.5)),
+            hovertemplate=(
+                f"<b>Min Variance Portfolio</b><br>"
+                f"Return: {mv['expected_return']:.2%}<br>"
+                f"Volatility: {mv['volatility']:.2%}<br>"
+                f"Sharpe: {mv['sharpe_ratio']:.4f}<br>"
+                f"<br>Weights:<br>{mv_weights_str}<extra></extra>"
+            )
+        ))
+
+        # 4. Individual assets
+        for ticker, stats in frontier_data.get('individual_stats', {}).items():
+            fig.add_trace(go.Scatter(
+                x=[stats['annual_volatility']],
+                y=[stats['annual_return']],
+                mode='markers+text',
+                name=ticker,
+                text=[ticker],
+                textposition='top center',
+                marker=dict(size=10, symbol='circle', line=dict(color='black', width=1)),
+                hovertemplate=(
+                    f"<b>{ticker}</b><br>"
+                    f"Return: {stats['annual_return']:.2%}<br>"
+                    f"Volatility: {stats['annual_volatility']:.2%}<extra></extra>"
+                )
+            ))
+
+        # 5. Current portfolio (optional)
+        if current_portfolio:
+            fig.add_trace(go.Scatter(
+                x=[current_portfolio['volatility']],
+                y=[current_portfolio['expected_return']],
+                mode='markers',
+                name=f"Your Portfolio (SR={current_portfolio['sharpe_ratio']:.3f})",
+                marker=dict(color='red', size=16, symbol='x', line=dict(color='black', width=1.5)),
+                hovertemplate=(
+                    f"<b>Current Portfolio</b><br>"
+                    f"Return: {current_portfolio['expected_return']:.2%}<br>"
+                    f"Volatility: {current_portfolio['volatility']:.2%}<br>"
+                    f"Sharpe: {current_portfolio['sharpe_ratio']:.4f}<extra></extra>"
+                )
+            ))
+
+        fig.update_layout(
+            title_text="Efficient Frontier — Modern Portfolio Theory",
+            xaxis_title="Annual Volatility (Risk)",
+            yaxis_title="Expected Annual Return",
+            template="plotly_white",
+            height=650,
+            width=900,
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+            xaxis=dict(tickformat='.1%'),
+            yaxis=dict(tickformat='.1%'),
+        )
+
+        if show:
+            fig.show()
+
+        return fig
+
+
 class RecommendationEngine:
     """
     Aggregates analyzer outputs to generate a reasoned string with a BUY/HOLD/SELL verdict.

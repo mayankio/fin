@@ -169,6 +169,58 @@ class PortfolioAnalyzer(BaseAnalyzer):
             'risks': risks
         }
 
+class EfficientFrontierAnalyzer(BaseAnalyzer):
+    """
+    Computes the Efficient Frontier, Max Sharpe, and Min Variance portfolios
+    using Modern Portfolio Theory.
+
+    Expected data: {
+        'prices': pd.DataFrame (columns=tickers, rows=dates, values=Close prices),
+        'risk_free_rate': float (default 0.045),
+        'weight_bounds': tuple (default (0.0, 1.0)),
+        'num_frontier_points': int (default 100)
+    }
+    """
+    def run(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        prices = data.get('prices')
+        if prices is None or prices.empty:
+            return {"error": "No price data provided for EfficientFrontierAnalyzer"}
+
+        risk_free_rate = data.get('risk_free_rate', 0.045)
+        weight_bounds = data.get('weight_bounds', (0.0, 1.0))
+        num_frontier_points = data.get('num_frontier_points', 100)
+
+        try:
+            from mpt_engine import run_optimization
+            result = run_optimization(
+                prices_df=prices,
+                risk_free_rate=risk_free_rate,
+                weight_bounds=weight_bounds,
+                num_frontier_points=num_frontier_points
+            )
+        except ValueError as e:
+            return {"error": f"Optimization failed: {str(e)}"}
+
+        # Convert dataclass results into plain dict for consistency with other analyzers
+        def _portfolio_to_dict(pr):
+            return {
+                'weights': {t: float(w) for t, w in zip(pr.ticker_labels, pr.weights)},
+                'expected_return': pr.expected_return,
+                'volatility': pr.volatility,
+                'sharpe_ratio': pr.sharpe_ratio,
+            }
+
+        return {
+            'max_sharpe': _portfolio_to_dict(result.max_sharpe),
+            'min_variance': _portfolio_to_dict(result.min_variance),
+            'frontier_returns': result.frontier_returns,
+            'frontier_volatilities': result.frontier_volatilities,
+            'individual_stats': result.individual_stats,
+            'correlation_matrix': result.correlation_matrix,
+            'covariance_matrix': result.covariance_matrix,
+        }
+
+
 class SentimentAnalyzer(BaseAnalyzer):
     """
     Evaluates market sentiment using HuggingFace's FinBERT model.

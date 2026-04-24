@@ -40,11 +40,30 @@ The lower-level implementation relies on strict Python typing (`typing.Dict`, `t
 - Consumes dictionary formats modeled as `{'ticker': {'weight': float, 'info': dict}}`.
 - Sum-products the weights into aggregated total portfolio Beta.
 
+**Implementation: `EfficientFrontierAnalyzer`**
+- Consumes `{'prices': pd.DataFrame, 'risk_free_rate': float, 'weight_bounds': tuple}`.
+- Delegates all computation to the pure-function `mpt_engine` module.
+- Returns dict with `max_sharpe`, `min_variance` portfolios, frontier curve data, per-asset stats, and correlation/covariance matrices.
+
+### 1.2b. Module: `mpt_engine.py`
+**Dataclasses: `PortfolioResult`, `EfficientFrontierResult`**
+- Structured containers for optimization outputs. `PortfolioResult` holds weights, return, volatility, and Sharpe ratio.
+
+**Pure Functions:**
+- `compute_daily_returns(prices_df)` → daily percentage change, NaN-dropped.
+- `compute_annual_returns(prices_df)` → mean daily return × 252.
+- `compute_covariance_matrix(prices_df)` → daily return covariance × 252.
+- `portfolio_performance(weights, mean_returns, cov_matrix, rf)` → `(return, volatility, sharpe)`.
+- `optimize_max_sharpe(mean_returns, cov_matrix, rf, bounds)` → `scipy.optimize.minimize` with `method='SLSQP'`, objective: negative Sharpe ratio, constraint: `Σw = 1`.
+- `optimize_min_variance(mean_returns, cov_matrix, bounds)` → minimize `w^T Σ w` subject to `Σw = 1`.
+- `compute_efficient_frontier(mean_returns, cov_matrix, rf, num_points, bounds)` → sweeps target returns from min-var to max, solving min-variance at each target. Returns `(volatilities[], returns[])`.
+- `run_optimization(prices_df, rf, bounds, num_points)` → full pipeline combining all above into `EfficientFrontierResult`.
+
 ### 1.3. Module: `reporting.py`
 **Class: `Visualizer`**
 - Imports `plotly.graph_objects` (`go`).
-- Uses `make_subplots` allocating row height ratio `[0.3, 0.7]` (30% bottom MACD height, 70% top Candlestick height).
-- Leverages Python list comprehension to dynamically assign bar colors (`go.Bar`) based on MACD histogram zero-line crossover.
+- `plot_technical_analysis`: Uses `make_subplots` allocating row height ratio `[0.3, 0.7]` (30% bottom MACD height, 70% top Candlestick height). Leverages Python list comprehension to dynamically assign bar colors (`go.Bar`) based on MACD histogram zero-line crossover.
+- `plot_efficient_frontier`: Renders interactive scatter chart with Efficient Frontier curve (line trace), Max Sharpe (gold star marker), Min Variance (green diamond), individual assets (labeled circles), and optional current portfolio (red X). Hover text displays weight allocations. Axes formatted as percentages.
 
 **Class: `RecommendationEngine`**
 - Stateful heuristical integer scoring system: `score = 0`.
@@ -69,7 +88,12 @@ The three individual orchestrators utilize explicit command-line interfacing (CL
    - Responsible for combining FA, TA, and Comparative Peer outputs into synchronous presentation via standard out.
 
 3. **`portfolio_optimizer.py`**
-   - Hardcoded dictionary configurations mapping ticker keys to weighted value bounds ensuring validation bounds (Sum == 1.0) internally.
+   - Accepts `--tickers` (required), `--current-weights`, `--risk-free-rate`, `--min-weight`, `--max-weight` via `argparse`.
+   - Two-mode operation: (a) optimization-only with tickers, (b) comparison mode with current weights.
+   - Fetches 2y historical OHLCV per ticker, aligns Close prices via inner join.
+   - Runs `PortfolioAnalyzer` for existing Beta/sector risk (if weights provided) and `EfficientFrontierAnalyzer` for MPT optimization.
+   - Prints CLI report with individual asset stats, correlation matrix, Max Sharpe and Min Variance portfolio recommendations with weight bar charts, and optional current-portfolio comparison.
+   - Renders interactive Efficient Frontier Plotly chart via `Visualizer.plot_efficient_frontier`.
 
 ## 3. Expected Exception Strategies
 
@@ -78,3 +102,7 @@ The three individual orchestrators utilize explicit command-line interfacing (CL
 | Ticker Does Not Exist | YFinance returns null/empty arrays | `data_provider.py` safely raises explicit `ValueError` bypassing pandas failures. Controller skips ticker. |
 | Missing `trailingPE` Data | Asset lacks GAAP required EPS | `analyzers.py` defaults to `None`. Reporting engine checks `is not None` and appends `None` notes securely. |
 | Disconnected Network | Failed `yfinance` socket bind | Exception bubbles to controller `except Exception` printing "Failed to fetch...". Does not exit runtime block loops (specifically for the Scanner array traversal). |
+| Optimization Non-Convergence | SLSQP fails to satisfy constraints | `mpt_engine.py` raises `ValueError` with convergence message. `EfficientFrontierAnalyzer` catches and returns `{'error': ...}`. Orchestrator prints error and exits gracefully. |
+| Infeasible Weight Bounds | User-specified bounds cannot satisfy `Σw = 1` | `scipy.optimize.minimize` returns `success=False`. Raised as `ValueError` in `mpt_engine.py`. |
+| Insufficient Price History | <30 trading days | `run_optimization` raises `ValueError` before any computation. |
+

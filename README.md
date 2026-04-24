@@ -7,7 +7,7 @@ An automated, object-oriented Python application for stock market analysis utili
 The system strictly adheres to SOLID principles and is structured into layers to cleanly separate concerns:
 
 1. **Data Layer (`data_provider.py`)**: Abstracted via `MarketDataProvider` to decouple from the specific data source. The `YFinanceProvider` class handles fetching historical prices, financials, and company data.
-2. **Analysis Layer (`analyzers.py`)**: Implements the **Strategy Pattern** via `BaseAnalyzer`. Multiple standalone modular analyzers perform specific logic (Technical, Fundamental, Competitor, Portfolio).
+2. **Analysis Layer (`analyzers.py`, `mpt_engine.py`)**: Implements the **Strategy Pattern** via `BaseAnalyzer`. Multiple standalone modular analyzers perform specific logic (Technical, Fundamental, Competitor, Portfolio, EfficientFrontier). The `mpt_engine.py` module is a pure-math submodule containing Modern Portfolio Theory computations with zero side effects.
 3. **Presentation Layer (`reporting.py`)**: Responsible for drawing interactive charts (`Visualizer`) via Plotly and generating structured text analysis reports (`RecommendationEngine`).
 4. **Orchestration Layer (`market_scanner.py`, `asset_profiler.py`, `portfolio_optimizer.py`)**: Standalone scripts that execute specific workflows using the underlying layers.
 
@@ -37,9 +37,16 @@ python3 asset_profiler.py --ticker NVDA --competitors AMD INTC QCOM
 ```
 
 ### PortfolioOptimizer (`portfolio_optimizer.py`)
-Reviews an arbitrary portfolio based on given weighted ticker allocation. Highlights any sector concentration risk (e.g. >40% in Tech) and aggregated portfolio Beta.
+Optimizes portfolio allocations using **Modern Portfolio Theory**. Computes the Efficient Frontier, identifies the Maximum Sharpe Ratio and Minimum Variance portfolios, and renders an interactive visualization. Optionally compares against your current allocation.
 ```bash
-python3 portfolio_optimizer.py
+# Basic optimization — find optimal weights for these stocks
+python3 portfolio_optimizer.py --tickers AAPL MSFT GOOGL AMZN
+
+# Compare your current portfolio against the optimal
+python3 portfolio_optimizer.py --tickers AAPL MSFT GOOGL --current-weights 0.5 0.3 0.2
+
+# Custom constraints — set per-stock weight bounds and risk-free rate
+python3 portfolio_optimizer.py --tickers TSLA AAPL MSFT --risk-free-rate 0.04 --min-weight 0.05 --max-weight 0.50
 ```
 
 ## Sentiment Analysis Engine (New Feature)
@@ -71,9 +78,37 @@ The application now features a powerful **Sentiment Analysis Engine** that gauge
    python3 market_scanner.py --tickers AAPL MSFT --enable-sentiment --lookback-days 1
    ```
 
+## Advanced Portfolio Optimization (New Feature)
+
+The `portfolio_optimizer.py` module has been upgraded from a simple Beta/sector risk reporter to a full **Modern Portfolio Theory (MPT) optimizer** powered by `scipy.optimize`.
+
+### Features
+- **Efficient Frontier:** Computes the full set of optimal portfolios across the risk-return spectrum and renders an interactive Plotly chart.
+- **Max Sharpe Ratio Portfolio:** Identifies the tangency portfolio — the allocation that maximizes return per unit of risk.
+- **Minimum Variance Portfolio:** Identifies the most conservative allocation with the lowest possible volatility.
+- **Per-Asset Statistics:** Displays annualized return, annualized volatility, and the full correlation matrix.
+- **Current Portfolio Comparison:** If you provide your current weights, the tool shows exactly where your portfolio sits relative to the efficient frontier and quantifies the Sharpe Ratio improvement available.
+- **Configurable Constraints:** Set per-asset minimum/maximum weight bounds (e.g., `--min-weight 0.05 --max-weight 0.40`) and a custom risk-free rate.
+
+### How It Works
+1. Fetches 2 years of historical daily close prices for all specified tickers via YFinance.
+2. Computes annualized returns and the covariance matrix from daily returns.
+3. Uses `scipy.optimize.minimize` (SLSQP) with sum-to-one equality constraints and per-asset bounds to find optimal portfolios.
+4. Sweeps target returns from minimum-variance to maximum to trace the Efficient Frontier.
+5. Renders an interactive Plotly scatter chart annotated with the optimal portfolios and individual asset positions.
+
+### CLI Options
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--tickers` | Stock tickers to optimize (required) | — |
+| `--current-weights` | Your current allocation (same order as tickers) | None |
+| `--risk-free-rate` | Annualized risk-free rate for Sharpe calculation | 0.045 (4.5%) |
+| `--min-weight` | Minimum weight per asset | 0.0 |
+| `--max-weight` | Maximum weight per asset | 1.0 |
+
 ## Extensibility
 
-The application leverages the **Strategy Pattern** for the Analysis Layer, making it inherently extensible without needing to rewrite the core controller logic.
+The application leverages the **Strategy Pattern** for the Analysis Layer, making it inherently extensible without needing to rewrite the core controller logic. The MPT optimization feature demonstrates this pattern — `EfficientFrontierAnalyzer` was added as a new `BaseAnalyzer` implementation and plugged into the orchestrator with zero changes to existing analyzers.
 
 ### How to add a new `MLForecastingAnalyzer`:
 
